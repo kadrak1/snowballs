@@ -30,6 +30,19 @@ public class PlayerThrowing : MonoBehaviour
         {
             uiManager.UpdateHandsStatus(GetHandsStatusString(), currentMoldClicks, moldClicksRequired);
         }
+
+        if (playerCamera == null)
+        {
+            var cam = GetComponentInChildren<Camera>();
+            if (cam != null)
+            {
+                playerCamera = cam;
+            }
+            else if (Camera.main != null)
+            {
+                playerCamera = Camera.main;
+            }
+        }
     }
 
     void Update()
