@@ -17,7 +17,7 @@ public class Health : MonoBehaviour
 
     public void TakeDamage(int damage)
     {
-        currentHealth -= damage;
+        currentHealth = Mathf.Clamp(currentHealth - damage, 0, maxHealth);
         OnDamageTaken?.Invoke(currentHealth);
         Debug.Log(gameObject.name + " took " + damage + " damage. Current health: " + currentHealth);
 
@@ -25,6 +25,17 @@ public class Health : MonoBehaviour
         {
             Die();
         }
+    }
+
+    public void TakeDamageFrom(GameObject source, int damage)
+    {
+        if (source == null) return;
+        var projectile = source.GetComponent<SnowballProjectile>();
+        if (projectile == null)
+        {
+            return;
+        }
+        TakeDamage(damage);
     }
 
     void Die()

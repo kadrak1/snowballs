@@ -96,6 +96,10 @@ public class PlayerThrowing : MonoBehaviour
 
         Vector3 direction = (targetPoint - firePoint.position).normalized;
         GameObject snowball = Instantiate(snowballPrefab, firePoint.position, Quaternion.LookRotation(direction));
+        if (snowball.GetComponent<SnowballProjectile>() == null)
+        {
+            snowball.AddComponent<SnowballProjectile>();
+        }
         snowball.layer = gameObject.layer;
         Rigidbody rb = snowball.GetComponent<Rigidbody>();
         if (rb != null)
