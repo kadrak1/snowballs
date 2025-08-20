@@ -7,6 +7,8 @@ public class PlayerThrowing : MonoBehaviour
     public GameObject snowballPrefab;
     public Transform firePoint;
     public float fireForce = 20f;
+    public bool useSpeed = false;
+    public float snowballSpeed = 20f;
 
     public UIManager uiManager;
     public Camera playerCamera;
@@ -104,7 +106,14 @@ public class PlayerThrowing : MonoBehaviour
         Rigidbody rb = snowball.GetComponent<Rigidbody>();
         if (rb != null)
         {
-            rb.AddForce(direction * fireForce, ForceMode.Impulse);
+            if (useSpeed)
+            {
+                rb.linearVelocity = direction * snowballSpeed;
+            }
+            else
+            {
+                rb.AddForce(direction * fireForce, ForceMode.Impulse);
+            }
         }
     }
 
