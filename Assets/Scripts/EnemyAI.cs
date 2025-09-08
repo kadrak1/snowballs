@@ -27,6 +27,11 @@ public class EnemyAI : MonoBehaviour
 	public float lostTargetSearchTime = 5f;
 	public float lastKnownPositionSearchRadius = 5f;
 	public float aggressiveness = 0.5f;
+	
+	[Header("Ballistic Throwing")]
+	public bool useBallisticCalculation = true;
+	public float maxLaunchAngle = 45f;
+	public float aimPredictionTime = 0.5f;
 
 	[Header("Jump Reaction")]
 	public float incomingSnowballDetectRadius = 3.0f;
@@ -304,10 +309,21 @@ public class EnemyAI : MonoBehaviour
 	{
 		if (snowballPrefab == null || firePoint == null) return;
 
-		Vector3 target = player.position + Vector3.up * 1.0f;
-		Vector3 dir = (target - firePoint.position).normalized;
+		Vector3 launchVelocity;
+		if (useBallisticCalculation)
+		{
+			launchVelocity = CalculateBallisticVelocity();
+		}
+		else
+		{
+			Vector3 target = player.position + Vector3.up * 1.0f;
+			Vector3 dir = (target - firePoint.position).normalized;
+			launchVelocity = dir * snowballSpeed;
+		}
 
-		GameObject snowball = Instantiate(snowballPrefab, firePoint.position, Quaternion.LookRotation(dir));
+		if (launchVelocity == Vector3.zero) return; // Failed to calculate trajectory
+
+		GameObject snowball = Instantiate(snowballPrefab, firePoint.position, Quaternion.LookRotation(launchVelocity));
 
 		if (snowball.GetComponent<SnowballProjectile>() == null)
 		{
@@ -326,16 +342,83 @@ public class EnemyAI : MonoBehaviour
 		rb.angularDamping = 0.05f;
 		rb.linearVelocity = Vector3.zero;
 		rb.angularVelocity = Vector3.zero;
-		if (useSpeed)
+		rb.linearVelocity = launchVelocity;
+
+		IgnoreCollisionWithSelf(snowball);
+	}
+
+	Vector3 CalculateBallisticVelocity()
+	{
+		if (player == null) return Vector3.zero;
+
+		// Predict player position
+		Rigidbody playerRb = player.GetComponent<Rigidbody>();
+		Vector3 playerVelocity = Vector3.zero;
+		if (playerRb != null)
 		{
-			rb.linearVelocity = dir * snowballSpeed;
+			playerVelocity = playerRb.linearVelocity;
 		}
 		else
 		{
-			rb.AddForce(dir * snowballForce, ForceMode.Impulse);
+			// Fallback: estimate velocity from movement
+			CharacterController playerController = player.GetComponent<CharacterController>();
+			if (playerController != null)
+			{
+				playerVelocity = playerController.velocity;
+			}
 		}
 
-		IgnoreCollisionWithSelf(snowball);
+		Vector3 predictedPlayerPos = player.position + playerVelocity * aimPredictionTime;
+		Vector3 targetPos = predictedPlayerPos + Vector3.up * 1.0f;
+
+		return CalculateTrajectory(firePoint.position, targetPos, snowballSpeed);
+	}
+
+	Vector3 CalculateTrajectory(Vector3 startPos, Vector3 targetPos, float projectileSpeed)
+	{
+		Vector3 displacement = targetPos - startPos;
+		Vector3 displacementXZ = new Vector3(displacement.x, 0, displacement.z);
+		float horizontalDistance = displacementXZ.magnitude;
+		float verticalDistance = displacement.y;
+
+		float gravity = Mathf.Abs(Physics.gravity.y);
+		
+		// Try different launch angles to find optimal trajectory
+		for (float angle = 15f; angle <= maxLaunchAngle; angle += 5f)
+		{
+			float angleRad = angle * Mathf.Deg2Rad;
+			float requiredSpeed = Mathf.Sqrt((horizontalDistance * gravity) / 
+				Mathf.Sin(2 * angleRad));
+
+			// Check if we can achieve this with our projectile speed (with some tolerance)
+			if (requiredSpeed <= projectileSpeed * 1.2f)
+			{
+				float adjustedSpeed = Mathf.Min(requiredSpeed, projectileSpeed);
+				
+				// Calculate velocity components
+				float vx = adjustedSpeed * Mathf.Cos(angleRad);
+				float vy = adjustedSpeed * Mathf.Sin(angleRad);
+
+				// Calculate time to reach target
+				float timeToTarget = horizontalDistance / vx;
+				
+				// Check if projectile will be at correct height
+				float predictedHeight = vy * timeToTarget - 0.5f * gravity * timeToTarget * timeToTarget;
+				float heightDifference = Mathf.Abs(predictedHeight - verticalDistance);
+				
+				if (heightDifference < 2f) // Allow some tolerance
+				{
+					Vector3 direction = displacementXZ.normalized;
+					return new Vector3(direction.x * vx, vy, direction.z * vx);
+				}
+			}
+		}
+
+		// Fallback: direct trajectory with slight upward angle
+		Vector3 directDir = displacement.normalized;
+		float upwardAdjustment = Mathf.Clamp(horizontalDistance / 20f, 0.1f, 0.4f);
+		directDir.y += upwardAdjustment;
+		return directDir.normalized * projectileSpeed;
 	}
 
 	void IgnoreCollisionWithSelf(GameObject proj)
@@ -460,6 +543,19 @@ public class EnemyAI : MonoBehaviour
 			Gizmos.DrawWireSphere(lastKnownPlayerPosition, lastKnownPositionSearchRadius);
 		}
 		
+		// Draw predicted trajectory during gameplay
+		if (Application.isPlaying && player != null && firePoint != null && currentState == AIState.Combat)
+		{
+			if (useBallisticCalculation)
+			{
+				Vector3 launchVelocity = CalculateBallisticVelocity();
+				if (launchVelocity != Vector3.zero)
+				{
+					DrawTrajectoryGizmo(firePoint.position, launchVelocity);
+				}
+			}
+		}
+		
 		// Draw current state
 		if (Application.isPlaying)
 		{
@@ -467,6 +563,25 @@ public class EnemyAI : MonoBehaviour
 			style.normal.textColor = Color.white;
 			UnityEngine.GUI.Label(new UnityEngine.Rect(10, 10, 200, 20), 
 				$"AI State: {currentState}", style);
+		}
+	}
+
+	void DrawTrajectoryGizmo(Vector3 startPos, Vector3 velocity)
+	{
+		Gizmos.color = Color.cyan;
+		Vector3 currentPos = startPos;
+		Vector3 currentVel = velocity;
+		float timeStep = 0.1f;
+		
+		for (int i = 0; i < 50; i++)
+		{
+			Vector3 nextPos = currentPos + currentVel * timeStep;
+			currentVel += Physics.gravity * timeStep;
+			
+			Gizmos.DrawLine(currentPos, nextPos);
+			currentPos = nextPos;
+			
+			if (currentPos.y < startPos.y - 10f) break; // Stop if too low
 		}
 	}
 }
